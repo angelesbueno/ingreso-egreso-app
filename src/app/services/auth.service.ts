@@ -1,29 +1,56 @@
+import * as authActions from './../auth/auth.actions';
 import { Injectable } from '@angular/core';
 import { AngularFireAuth } from '@angular/fire/auth';
 import { AngularFirestore } from '@angular/fire/firestore';
-import { Observable } from 'rxjs';
+import { Store } from '@ngrx/store';
+import { Observable, Subscription } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { AppState } from '../app.reducer';
 import { Usuario } from '../models/usuario.model';
 
 @Injectable({
   providedIn: 'root',
 })
 export class AuthService {
-  constructor(public auth: AngularFireAuth, public firestore: AngularFirestore) {}
+
+  private userSubscription: Subscription;
+
+  constructor(
+    public auth: AngularFireAuth,
+    public firestore: AngularFirestore,
+    private store: Store<AppState>
+  ) {}
 
   public initAuthListener(): void {
-    this.auth.authState.subscribe(firebaseUser => {
-      console.log('firebaseUser ---> ', firebaseUser);
-      console.log('firebaseUser.id ---> ', firebaseUser?.uid);
-      console.log('firebaseUser.email ---> ', firebaseUser?.email);
-    })
+    this.auth.authState.subscribe((firebaseUser) => {
+      if (firebaseUser) {
+        // existe
+        this.userSubscription = this.firestore
+          .doc(`${firebaseUser.uid}/usuario`)
+          .valueChanges()
+          .subscribe((firestoreUser: any) => {
+            const user = Usuario.fromfirebase(firestoreUser);
+            this.store.dispatch(authActions.setUser({ user }));
+          });
+      } else {
+        // no existe
+        this.userSubscription.unsubscribe();
+        this.store.dispatch(authActions.unSetUser());
+      }
+    });
   }
 
-  public crearUsuario(nombre: string, email: string, password: string): Promise<any> {
-    return this.auth.createUserWithEmailAndPassword(email, password).then(({user}) => {
-      const newUser = new Usuario(user.uid, nombre, email);
-      return this.firestore.doc(`${user.uid}/usuario`).set({...newUser});
-    });
+  public crearUsuario(
+    nombre: string,
+    email: string,
+    password: string
+  ): Promise<any> {
+    return this.auth
+      .createUserWithEmailAndPassword(email, password)
+      .then(({ user }) => {
+        const newUser = new Usuario(user.uid, nombre, email);
+        return this.firestore.doc(`${user.uid}/usuario`).set({ ...newUser });
+      });
   }
 
   public loginUsuario(email: string, password: string): Promise<any> {
@@ -31,10 +58,12 @@ export class AuthService {
   }
 
   public logout(): Promise<any> {
-   return this.auth.signOut();
+    return this.auth.signOut();
   }
 
   public isAuth(): Observable<boolean> {
-    return this.auth.authState.pipe(map(firebaseUser => firebaseUser != null ));
+    return this.auth.authState.pipe(
+      map((firebaseUser) => firebaseUser != null)
+    );
   }
 }
